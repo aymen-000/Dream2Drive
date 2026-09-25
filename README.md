@@ -208,7 +208,7 @@ and, if useful, this repository:
 
 ```bibtex
 @misc{apexdreamer2026,
-  title  = {Dream To Drive: Learning Temporally Abstract World Models without Online Experimentation for F1TENTH},
+  title  = {Dream2Drive: Learning Temporally Abstract World Models for Zero-Shot F1TENTH Racing},
   author = {Aimen Boukhari},
   year   = {2026},
   note   = {Adaptation of Freed et al. (ICML 2023) to F1TENTH autonomous racing},
