@@ -1,0 +1,113 @@
+data:
+  root: "data/offline"
+  maps_root: "maps"
+  runs: null
+  train_run_frac: 0.95
+  subtraj_len: 20
+  subsample_stride: 4
+  dropna: true
+  lidar_dim: 128
+  lidar_max_range: 30.0
+
+  state_features:
+    - x
+    - y
+    - steer_angle
+    - vel
+    - yaw_angle
+    - yaw_rate
+    - slip_angle
+
+  action_features:
+    - steer_cmd
+    - speed_cmd
+
+collection:
+  map_names: ["Spielberg" , "Austin" , "MoscowRaceway"]
+  laps_per_map: 600
+  episodes_per_map: 600
+  run_seconds: 30
+  max_speed_choices: [3.0, 4.0, 5.0, 6.0]
+  action_noise: true
+  steer_noise_std: 0.06
+  speed_noise_std: 0.5
+  control_hz: 20
+  timestep: 0.01
+  wheelbase_m: 0.33
+  max_steer_rad: 0.4
+  seed: 0
+  out_root: "data/offline"
+  lidar_num_beams: 20
+  lidar_subsample: 20
+
+model:
+  z_dim: 16
+  hidden_dim: 128
+  gru_hidden_dim: 128
+  gru_bidirectional: true
+  min_std: 1.0e-3
+  obs_embed_dim: 128
+  tawm_predict_delta: true
+
+
+train:
+
+  batch_size: 128
+  lr_e: 1.0e-4
+  lr_m: 1.0e-4
+  num_epochs: 150
+  steps_per_epoch: 500
+  grad_clip_norm: 5.0
+  device: "cuda"
+  seed: 0
+  checkpoint_dir: "checkpoints"
+  log_every: 50
+  save_every_epochs: 10
+  mode: "causal_em"
+
+planning:
+  plan_length: 2
+
+  population_size: 512
+  elite_frac: 0.10
+  cem_iters: 5
+  init_std: 1.0
+
+  replan_every_skills: 2
+  max_skills_per_episode: 300
+  max_laps: 1
+  waypoint_spacing_m: 3.0
+  waypoint_reach_radius_m: 1.5
+  waypoint_bonus_reward: 5.0
+  progress_reward_weight: 1.0
+
+  track_half_width_m: 1.5
+  off_track_penalty: 20.0
+  backward_penalty: 2.0
+  max_progress_per_skill_m: 12.0
+
+  collision_penalty: 1000.0
+  device: "cuda"
+  reward : "progress" #TAL NOT IMPLEMENTED , cth
+
+mpc:
+  horizon: 4
+  population_size: 512
+  cem_iters: 5
+  elite_frac: 0.15
+  init_steer_std: 0.15
+  init_speed_std: 1.5
+  dt: 0.05
+  max_seconds: 60.0
+
+f1tenth_env:
+  render: true
+  control_hz: 20
+  timestep: 0.01
+  max_steer_rad: 0.4
+  max_speed_mps: 8.0
+  lidar_dim: 20
+
+evaluation:
+  num_eval_windows: 500
+  num_planning_runs: 3

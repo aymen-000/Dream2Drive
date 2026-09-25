@@ -1,0 +1,16 @@
+
+env/
+checkpoints/
+
+__pycache__/
+
+.vscode/
+
+outputs/
+track.npz/
+
+
+f1tenth_racetracks/
+maps/
+
+

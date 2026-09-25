@@ -1,0 +1,11 @@
+torch>=2.0.0
+numpy>=1.23
+pandas>=1.5
+PyYAML>=6.0
+matplotlib>=3.6
+tqdm>=4.65
+gym
+
+# f1tenth_gym is not on PyPI -- install separately:
+#   git clone https://github.com/f1tenth/f1tenth_gym.git
+#   cd f1tenth_gym && pip install -e .
