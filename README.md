@@ -4,32 +4,8 @@
 
 Dream To Drive learns a library of low-level driving *skills* and a **skill-conditioned, temporally abstract world model (TAWM)** entirely from a static, offline dataset of driving logs — no online interaction with the car or the simulator is used during training. Once trained, the world model is used **zero-shot** by a Cross-Entropy Method (CEM) planner to plan full laps on tracks it has never been actively driven on by the learning agent, purely by imagining rollouts in latent skill space.
 
-This repository is a from-scratch re-implementation and adaptation of **OPOSM**, the method introduced in:
-
-> Benjamin Freed, Siddarth Venkatraman, Guillaume Adrien Sartoretti, Jeff Schneider, Howie Choset.
-> **"Learning Temporally Abstract World Models without Online Experimentation."**
-> *Proceedings of the 40th International Conference on Machine Learning (ICML)*, PMLR 202:10338–10356, 2023.
-> [Paper (PMLR PDF)](https://proceedings.mlr.press/v202/freed23a/freed23a.pdf)
-
 adapted and modified for the [F1TENTH](https://www.f1tenth.racing/) 1/10th-scale autonomous racing platform, built on top of the official [`f1tenth_gym`](https://github.com/f1tenth/f1tenth_gym) simulator.
 
----
-
-## Table of Contents
-
-- [Motivation](#motivation)
-- [Method](#method)
-- [Adaptations to F1TENTH](#adaptations-to-f1tenth-changes-from-the-original-paper)
-- [Architecture](#architecture)
-- [Repository Structure](#repository-structure)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Results](#results)
-- [Citation](#citation)
-- [Acknowledgements](#acknowledgements)
-- [License](#license)
-
----
 
 ## Motivation
 
@@ -57,7 +33,7 @@ All four networks are trained jointly on offline sub-trajectory windows with an 
 - **`causal_em`** — an EM-style scheme, faithful to the paper, that alternates an E-step (updating only the skill posterior `φ`) with an M-step (updating the prior, low-level policy, TAWM, and observation encoder `ψ, ω, θ, encoder`), so the world model always regresses against a *frozen* posterior rather than co-adapting with it at every gradient step.
 - **`naive_vi`** — a single joint optimizer over all parameters (standard amortized VI), included as an ablation baseline to demonstrate the benefit of the causal EM decomposition.
 
-At test time, [`planning/cem_planner.py`](planning/cem_planner.py) plans directly in the model's latent space: it samples populations of skill sequences, rolls each one forward through the TAWM (no simulator calls), scores the resulting imagined terminal states against a track-progress reward, and iteratively refines the sampling distribution (Cross-Entropy Method) before executing the elite skill sequence — either purely in latent "imagination" or in closed-loop control of the `f1tenth_gym` car.
+At test time, [`planning/cem_planner.py`](planning/cem_planner.py) supports two latent-skill modes, selected with `planning.mode` in the config. `cem` (default) searches sequences of skills using the TAWM and Cross-Entropy Method, then executes the selected sequence in closed loop. `direct` skips sequence search and applies the conditional skill-prior mean once per LiDAR observation, executing one skill before reading a fresh scan.
 
 ## Adaptations to F1TENTH (changes from the original paper)
 
@@ -66,7 +42,7 @@ The original paper evaluates OPOSM on simulated locomotion/manipulation benchmar
 - **LiDAR-beam state representation instead of global pose.** The world-model state is built from range-clipped, normalized LiDAR beams (see [`utils/track.py`](utils/track.py), `figures/lidar_beams.png`) rather than raw `(x, y)` coordinates. A global pose is track-specific and would leak map identity into the latent state; a LiDAR-based state generalizes across maps and mirrors what a physical F1TENTH car actually observes. Pose is still computed internally for reward evaluation and control, but it is **not** part of the state given to the skill/world models.
 - **Delta-state prediction (`tawm_predict_delta`).** The TAWM optionally predicts the *change* in encoded state induced by a skill rather than the absolute terminal embedding, which stabilizes multi-skill rollouts during planning.
 - **Offline data collection via Pure Pursuit, not a fixed expert lap.** [`data/collector.py`](data/collector.py) drives `f1tenth_gym` with a Pure Pursuit controller under randomized target speeds and injected steering/speed noise (`action_noise`, `steer_noise_std`, `speed_noise_std`), so the offline dataset covers a spread of speeds and off-nominal recovery states rather than a single racing line — this is what lets the CEM planner later query the world model outside of the exact demonstrated trajectory.
-- **Track-progress CEM reward with hard collision/off-track penalties.** [`planning/reward.py`](planning/reward.py) implements a centerline-arclength progress reward for the CEM planner, with a large terminal penalty for imagined collisions and for leaving the track's drivable half-width, and a milder penalty for backward progress.
+- **Forward-clearance CEM reward.** [`planning/reward.py`](planning/reward.py) scores imagined scans using conservative clearance in the forward sector and a penalty when that sector falls below the configured safe distance. Side-wall proximity does not count as a frontal collision.
 - **Causal EM vs. naive VI as a first-class, directly comparable ablation** ([`scripts/evaluate.py`](scripts/evaluate.py)), rather than a single training recipe.
 - **A classical kinematic-bicycle MPC baseline** ([`planning/mpc_controller.py`](planning/mpc_controller.py)) implemented alongside the learned planner, so the learned TAWM+CEM pipeline is evaluated head-to-head against a standard model-based racing controller on the same tracks and reward.
 - **Direct integration with the official `f1tenth_gym`/`f110_gym` simulator** (vendored under [`f1tenth_gym/`](f1tenth_gym)) for data collection, closed-loop rollout, and rendering, including its GJK-based collision model and ray-casted LiDAR scan simulator.

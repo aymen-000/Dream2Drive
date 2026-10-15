@@ -14,8 +14,8 @@ from torch.utils.data import DataLoader
 
 from data.dataset import discover_runs, build_run_arrays, train_test_run_split, OfflineSkillDataset, load_centerline_for_run
 from models.skill_model import OPOSMSkillModel
-from planning.cem_planner import CEMPlanner, CEMPlannerConfig, mpc_race
-from planning.reward import CenterlineProgressReward
+from planning.cem_planner import CEMPlanner, CEMPlannerConfig, direct_skill_race, mpc_race
+from planning.reward import CenterlineProgressReward, LidarStructuralReward
 from planning.mpc_controller import KinematicMPCController, KinematicBicycleParams, MPCConfig,  classical_mpc_race
 from utils.normalization import Normalizer
 from scripts.config_utils import load_config, resolve_device
@@ -44,10 +44,10 @@ def tawm_prediction_mse(model, dataloader, device, num_batches=None):
             break
         batch = {k: v.to(device) for k, v in batch.items()}
         terms = model.elbo_terms(batch)
-        s0_emb = model.encode(batch["s0"])
-        sT_emb = model.encode(batch["sT"])
-        mu, _ = model.tawm(s0_emb, terms["z"])
-        mses.append(((mu - sT_emb) ** 2).mean().item()) 
+        o0_emb = model.lidar_encoder(batch["lidar_seq"][:, 0])
+        mu, _ = model.tawm(o0_emb, terms["z"])
+        target = torch.clamp(batch["lidar_T"], min=0.0, max=model.lidar_max_range) / model.lidar_max_range
+        mses.append(((mu - target) ** 2).mean().item())
         elbos.append(terms["elbo"].mean().item())
     return float(np.mean(mses)), float(np.mean(elbos))
 
@@ -122,12 +122,13 @@ def oposm_planning_eval(model, action_norm, state_norm, cfg, device, eval_runs, 
     for run in eval_runs:
         map_yaml , map_ext , centerline = load_centerline_for_run(maps_root, run)
         waypoints = centerline.subsample_waypoints(cfg.planning.waypoint_spacing_m)
-        reward_fn = CenterlineProgressReward(
-            waypoints,
-            waypoint_bonus=cfg.planning.waypoint_bonus_reward,
-            progress_weight=cfg.planning.progress_reward_weight,
-            off_track_penalty=cfg.planning.off_track_penalty,
-            reward_mode=cfg.planning.reward, 
+        reward_fn = LidarStructuralReward(
+            lidar_dim=model.lidar_dim,
+            forward_weight=cfg.planning.forward_reward_weight,
+            symmetry_weight=cfg.planning.symmetry_penalty_weight,
+            collision_penalty=cfg.planning.lidar_collision_penalty,
+            safe_distance=cfg.planning.safe_distance_m,
+            forward_fraction=cfg.planning.forward_beam_fraction,
         )
         skill_horizon = cfg.data.subtraj_len - 1
         planner_cfg = CEMPlannerConfig(
@@ -135,11 +136,12 @@ def oposm_planning_eval(model, action_norm, state_norm, cfg, device, eval_runs, 
             elite_frac=cfg.planning.elite_frac, cem_iters=cfg.planning.cem_iters,
             init_std=cfg.planning.init_std, device=device,
         )
-        planner = CEMPlanner(model, state_norm, reward_fn, planner_cfg)
+        planner = CEMPlanner(model, reward_fn, planner_cfg)
         env_cfg = F1TenthEnvConfig(
                     map_yaml=map_yaml,
                     map_ext=map_ext, 
-                    lidar_dim=cfg.data.lidar_dim
+                    lidar_dim=cfg.data.lidar_dim,
+                    action_repeat=cfg.data.subsample_stride,
                 )
         heading0 = np.arctan2(*(centerline.points[1] - centerline.points[0])[::-1])
         initial_state_raw = np.array(
@@ -149,10 +151,14 @@ def oposm_planning_eval(model, action_norm, state_norm, cfg, device, eval_runs, 
         env = F1TenthEnvironment(model, state_norm, action_norm, cfg=env_cfg,
                                   initial_state_raw=initial_state_raw, device=device)
         print(f"[evaluate]   planning on '{run}' ...")
-        result = mpc_race(
+        race_fn = direct_skill_race if cfg.planning.mode == "direct" else mpc_race
+        race_kwargs = {} if cfg.planning.mode == "direct" else {
+            "replan_every_skills": cfg.planning.replan_every_skills,
+        }
+        result = race_fn(
             planner, env, waypoints, skill_horizon=skill_horizon,
             max_skills=cfg.planning.max_skills_per_episode, max_laps=cfg.planning.max_laps,
-            replan_every_skills=cfg.planning.replan_every_skills,
+            **race_kwargs,
         )
         result["map_name"] = run
         results_for_all_runs.append(result)
@@ -186,7 +192,7 @@ def classical_mpc_eval(cfg, eval_runs, maps_root, num_runs=1):
         env_cfg = F1TenthEnvConfig(
             map_yaml=map_yaml,
             map_ext=map_ext , 
-            lidar_dim=cfg.data.lidar_dim
+            lidar_dim=cfg.data.lidar_dim,
         ) 
         heading0 = np.arctan2(*(centerline.points[1] - centerline.points[0])[::-1])
         initial_state_raw = np.array(
@@ -226,6 +232,8 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if cfg.planning.mode not in {"cem", "direct"}:
+        raise ValueError("planning.mode must be 'cem' or 'direct'")
     device = resolve_device(cfg.train.device)
 
     state_norm = Normalizer.load(os.path.join(args.normalizer_dir, "state_normalizer.json"))

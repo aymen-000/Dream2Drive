@@ -103,6 +103,7 @@ class OfflineSkillDataset(Dataset):
             "states_seq": torch.as_tensor(states_window[:-1], dtype=torch.float32),
             "actions_seq": torch.as_tensor(actions_window, dtype=torch.float32),
             "lidar_seq": torch.as_tensor(lidar_window, dtype=torch.float32),
+            "lidar_T": torch.as_tensor(run.lidar[t + T], dtype=torch.float32),
             "sT": torch.as_tensor(states_window[-1], dtype=torch.float32),
             "done": torch.tensor(bool(run.dones[terminal_idx]), dtype=torch.bool),
             "collision": torch.tensor(bool(run.collisions[terminal_idx]), dtype=torch.bool),

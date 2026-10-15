@@ -3,11 +3,11 @@ data:
   maps_root: "maps"
   runs: null
   train_run_frac: 0.95
-  subtraj_len: 20
-  subsample_stride: 4
+  subtraj_len: 10
+  subsample_stride: 1
   dropna: true
   lidar_dim: 128
-  lidar_max_range: 30.0
+  lidar_max_range: 10.0
 
   state_features:
     - x
@@ -47,7 +47,8 @@ model:
   gru_bidirectional: true
   min_std: 1.0e-3
   obs_embed_dim: 128
-  tawm_predict_delta: true
+  # Predict absolute terminal state from the initial LiDAR embedding and z.
+  tawm_predict_delta: false
 
 
 train:
@@ -66,6 +67,9 @@ train:
   mode: "causal_em"
 
 planning:
+  # `cem` plans a sequence of latent skills; `direct` executes the
+  # conditional prior-mean z once per observation with no CEM search.
+  mode: "direct"
   plan_length: 2
 
   population_size: 512
@@ -73,7 +77,7 @@ planning:
   cem_iters: 5
   init_std: 1.0
 
-  replan_every_skills: 2
+  replan_every_skills: 1
   max_skills_per_episode: 300
   max_laps: 1
   waypoint_spacing_m: 3.0
@@ -87,8 +91,13 @@ planning:
   max_progress_per_skill_m: 12.0
 
   collision_penalty: 1000.0
+  forward_reward_weight: 1.0
+  symmetry_penalty_weight: 0.2
+  lidar_collision_penalty: 100.0
+  safe_distance_m: 0.35
+  forward_beam_fraction: 0.30
   device: "cuda"
-  reward : "progress" #TAL NOT IMPLEMENTED , cth
+  reward: "lidar_structural"
 
 mpc:
   horizon: 4

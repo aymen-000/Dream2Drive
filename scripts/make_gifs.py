@@ -42,7 +42,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 from envs.f1tenth_env import F1TenthEnvConfig, F1TenthEnvironment
 from models.skill_model import OPOSMSkillModel
 from planning.cem_planner import CEMPlanner, CEMPlannerConfig, mpc_race
-from planning.reward import CenterlineProgressReward
+from planning.reward import LidarStructuralReward
 from utils.normalization import Normalizer
 from utils.track import Centerline, discover_map
 from scripts.config_utils import load_config, resolve_device
@@ -89,23 +89,20 @@ def plan_and_run(cfg, model, state_norm, action_norm, map_name: str, device: str
         dtype=np.float32,
     )
 
-    reward_fn = CenterlineProgressReward(
-        waypoints_xy=waypoints_raw,
-        waypoint_bonus=cfg.planning.waypoint_bonus_reward,
-        progress_weight=cfg.planning.progress_reward_weight,
-        track_half_width=cfg.planning.track_half_width_m,
-        off_track_penalty=cfg.planning.off_track_penalty,
-        reward_mode=cfg.planning.reward,
-        backward_penalty=cfg.planning.backward_penalty,
-        max_progress_per_step=cfg.planning.max_progress_per_skill_m,
-        collision_penalty=cfg.planning.collision_penalty,
+    reward_fn = LidarStructuralReward(
+        lidar_dim=model.lidar_dim,
+        forward_weight=cfg.planning.forward_reward_weight,
+        symmetry_weight=cfg.planning.symmetry_penalty_weight,
+        collision_penalty=cfg.planning.lidar_collision_penalty,
+        safe_distance=cfg.planning.safe_distance_m,
+        forward_fraction=cfg.planning.forward_beam_fraction,
     )
     planner_cfg = CEMPlannerConfig(
         plan_length=cfg.planning.plan_length, population_size=cfg.planning.population_size,
         elite_frac=cfg.planning.elite_frac, cem_iters=cfg.planning.cem_iters,
         init_std=cfg.planning.init_std, device=device,
     )
-    planner = CEMPlanner(model, state_norm, reward_fn, planner_cfg)
+    planner = CEMPlanner(model, reward_fn, planner_cfg)
     skill_horizon = cfg.data.subtraj_len - 1
 
     env_cfg = F1TenthEnvConfig(
@@ -114,6 +111,7 @@ def plan_and_run(cfg, model, state_norm, action_norm, map_name: str, device: str
         max_speed_mps=cfg.f1tenth_env.max_speed_mps,
         render=render,
         lidar_dim=model.lidar_dim,
+        action_repeat=cfg.data.subsample_stride,
     )
     env = F1TenthEnvironment(model, state_norm, action_norm, env_cfg, initial_state_raw, device=device)
 

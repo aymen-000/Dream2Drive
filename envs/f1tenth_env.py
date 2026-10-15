@@ -26,6 +26,7 @@ class F1TenthEnvConfig:
     # loaded model was trained with.  Do not use a fixed stride here: F1TENTH
     # installations can expose different native scan resolutions.
     lidar_dim: Optional[int] = None
+    action_repeat: int = 1
 
 
 class F1TenthEnvironment:
@@ -41,6 +42,8 @@ class F1TenthEnvironment:
             self.action_normalizer = action_normalizer
         self.device = device
         self.cfg = cfg
+        if cfg.action_repeat <= 0:
+            raise ValueError("action_repeat must be positive")
         self.lidar_dim = cfg.lidar_dim 
         if self.lidar_dim <= 0:
             raise ValueError(f"lidar_dim must be positive, got {self.lidar_dim}")
@@ -64,6 +67,9 @@ class F1TenthEnvironment:
 
     def get_state(self) -> np.ndarray:
         return np.asarray(self.env.sim.agents[0].state, dtype=np.float32).copy()
+
+    def get_lidar(self) -> np.ndarray:
+        return self._policy_scan().copy()
 
     def _raw_step(self, steer: float, speed: float):
         steer = float(np.clip(steer, -self.cfg.max_steer_rad, self.cfg.max_steer_rad))
@@ -102,15 +108,17 @@ class F1TenthEnvironment:
 
     def execute_skill(self, z: np.ndarray, horizon: int) -> np.ndarray:
         z_t = torch.as_tensor(z, dtype=torch.float32, device=self.device).unsqueeze(0)
+        hidden = None
         for _ in range(horizon):
-            scan = self._policy_scan()
-            o_t = torch.as_tensor(scan, dtype=torch.float32, device=self.device).unsqueeze(0)
+            scan = torch.as_tensor(self._policy_scan(), dtype=torch.float32, device=self.device).unsqueeze(0)
             with torch.no_grad():
-                o_embed = self.model.lidar_encoder(o_t)
-                a_mu, _ = self.model.low_level_policy(o_embed, z_t)
-            a_raw = self.action_normalizer.inverse_transform(a_mu.cpu().numpy())[0]
-            for _ in range(self._substeps):
-                self._raw_step(a_raw[0], a_raw[1])
+                o_embed = self.model.lidar_encoder(scan)
+                action_dist, hidden = self.model.low_level_policy.step(o_embed, z_t, hidden)
+                a_norm = action_dist.mean[0].cpu().numpy()
+            a_raw = self.action_normalizer.inverse_transform(a_norm[None, :])[0]
+            for _ in range(self.cfg.action_repeat):
+                for _ in range(self._substeps):
+                    self._raw_step(a_raw[0], a_raw[1])
         return self.get_state()
 
     def close(self):
