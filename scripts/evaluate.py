@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 
 from data.dataset import discover_runs, build_run_arrays, train_test_run_split, OfflineSkillDataset, load_centerline_for_run
 from models.skill_model import OPOSMSkillModel
-from planning.cem_planner import CEMPlanner, CEMPlannerConfig, direct_skill_race, mpc_race
+from planning.cem_planner import CEMPlanner, CEMPlannerConfig, mpc_race
 from planning.reward import CenterlineProgressReward, LidarStructuralReward
 from planning.mpc_controller import KinematicMPCController, KinematicBicycleParams, MPCConfig,  classical_mpc_race
 from utils.normalization import Normalizer
@@ -157,14 +157,10 @@ def oposm_planning_eval(model, action_norm, state_norm, cfg, device, eval_runs, 
         env = F1TenthEnvironment(model, state_norm, action_norm, cfg=env_cfg,
                                   initial_state_raw=initial_state_raw, device=device)
         print(f"[evaluate]   planning on '{run}' ...")
-        race_fn = direct_skill_race if cfg.planning.mode == "direct" else mpc_race
-        race_kwargs = {} if cfg.planning.mode == "direct" else {
-            "replan_every_skills": cfg.planning.replan_every_skills,
-        }
-        result = race_fn(
+        result = mpc_race(
             planner, env, waypoints, skill_horizon=skill_horizon,
             max_skills=cfg.planning.max_skills_per_episode, max_laps=cfg.planning.max_laps,
-            **race_kwargs,
+            replan_every_skills=cfg.planning.replan_every_skills,
         )
         result["map_name"] = run
         results_for_all_runs.append(result)
@@ -238,8 +234,6 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    if cfg.planning.mode not in {"cem", "direct"}:
-        raise ValueError("planning.mode must be 'cem' or 'direct'")
     device = resolve_device(cfg.train.device)
 
     state_norm = Normalizer.load(os.path.join(args.normalizer_dir, "state_normalizer.json"))

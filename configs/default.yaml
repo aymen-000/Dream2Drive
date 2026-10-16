@@ -24,8 +24,8 @@ data:
 
 collection:
   map_names: ["Spielberg" , "Austin" , "MoscowRaceway"]
-  laps_per_map: 600
-  episodes_per_map: 600
+  laps_per_map: 1000
+  episodes_per_map: 1000
   run_seconds: 30
   max_speed_choices: [3.0, 4.0, 5.0, 6.0]
   action_noise: true
@@ -67,9 +67,7 @@ train:
   mode: "causal_em"
 
 planning:
-  # `cem` plans a sequence of latent skills; `direct` executes the
-  # conditional prior-mean z once per observation with no CEM search.
-  mode: "direct"
+  mode: "cem"
   plan_length: 2
 
   population_size: 512

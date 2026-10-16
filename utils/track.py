@@ -30,6 +30,9 @@ class Centerline:
     def __post_init__(self):
         seg = np.diff(self.points, axis=0, append=self.points[:1])
         seg_len = np.linalg.norm(seg, axis=1)
+        self.segments = seg
+        self.segment_lengths = seg_len
+        self.segment_lengths_sq = np.maximum(seg_len ** 2, 1e-8)
         self.cum_dist = np.concatenate([[0.0], np.cumsum(seg_len)])[:-1]  # [N]
         self.total_length = float(np.sum(seg_len))
         self.num_points = self.points.shape[0]
@@ -74,6 +77,33 @@ class Centerline:
         """Approximate arc-length progress (in meters, [0, total_length))
         of the closest centerline point to `xy`."""
         return float(self.cum_dist[self.nearest_index(xy)])
+
+    def project_m(self, xy: np.ndarray) -> tuple[float, float]:
+        """Project onto the closest centerline segment; return arc length and offset."""
+        xy = np.asarray(xy, dtype=np.float32)
+        offset = xy[None, :] - self.points
+        t = np.sum(offset * self.segments, axis=1) / self.segment_lengths_sq
+        t = np.clip(t, 0.0, 1.0)
+        projected = self.points + t[:, None] * self.segments
+        delta = xy[None, :] - projected
+        d2 = np.sum(delta * delta, axis=1)
+        idx = int(np.argmin(d2))
+        arc_length = float(self.cum_dist[idx] + t[idx] * self.segment_lengths[idx])
+        return arc_length, float(np.sqrt(d2[idx]))
+
+
+def relative_progress_m(absolute_s: float, start_s: float, total_length: float) -> float:
+    """Distance along a closed centerline from the episode start, wrapped to one lap."""
+    if total_length <= 0:
+        return 0.0
+    return float((absolute_s - start_s) % total_length)
+
+
+def progress_fraction(progress_m: float, total_length: float) -> float:
+    """Clamp distance traveled from an episode start to a [0, 1] lap fraction."""
+    if total_length <= 0:
+        return 0.0
+    return float(np.clip(progress_m / total_length, 0.0, 1.0))
 
     def lateral_error_m(self, xy: np.ndarray) -> float:
         """Distance from `xy` to the nearest centerline point -- used as a

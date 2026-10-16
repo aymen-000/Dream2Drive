@@ -13,7 +13,7 @@ sys.path.insert(0, ROOT)
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from rl_baselines.f1tenth import F1TenthRLTrackEnv, rl_env_config_from_project
+from rl_baselines.ppo_env import F1TenthPPOEnv
 from scripts.config_utils import load_config
 
 
@@ -62,12 +62,12 @@ def main():
 
     def make_env(map_name):
         def _init():
-            env_cfg = rl_env_config_from_project(
-                args.config, map_name, args.max_episode_seconds,
-                randomize_start=True,
+            return F1TenthPPOEnv(
+                map_name, randomize_start=True,
+                max_episode_seconds=args.max_episode_seconds,
+                config_path=args.config,
                 time_penalty_per_sec=args.time_penalty_per_sec,
             )
-            return F1TenthRLTrackEnv(env_cfg)
         return _init
 
     vec_env = DummyVecEnv([make_env(name) for name in selected_maps])
@@ -89,7 +89,8 @@ def main():
         "algorithm": "PPO", "seed": args.seed, "total_timesteps": args.timesteps,
         "training_maps": maps, "environment_maps": selected_maps,
         "randomized_start": True, "max_episode_seconds": args.max_episode_seconds,
-        "observation": f"{cfg.data.lidar_dim} LiDAR ranges scaled to [0, 1]",
+        "observation": (f"{cfg.data.lidar_dim} LiDAR ranges scaled to [0, 1], "
+                        "followed by speed/max_speed and steering/max_steer in [-1, 1]"),
         "action": "normalized steering and target speed in [-1, 1]",
         "hyperparameters": {
             "n_envs": n_envs, "n_steps": args.n_steps, "batch_size": args.batch_size,

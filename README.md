@@ -6,10 +6,9 @@ Dream2Drive adapts OPOSM to F1TENTH autonomous racing. It learns latent driving 
 
 ## Method
 
-An encoder maps each offline trajectory segment to a latent skill. The skill-conditioned policy decodes that skill into low-level steering and speed commands, while the world model predicts the terminal LiDAR scan after executing it. The model is trained offline with a causal EM objective. At run time, `planning.mode` selects either:
+An encoder maps each offline trajectory segment to a latent skill. The skill-conditioned policy decodes that skill into low-level steering and speed commands, while the world model predicts the terminal LiDAR scan after executing it. The model is trained offline with a causal EM objective. At run time, CEM searches over sequences of latent skills using imagined LiDAR rollouts and a structural reward:
 
 - `cem`: Cross-Entropy Method search over sequences of latent skills.
-- `direct`: execute the conditional prior-mean skill once per observation, without CEM search.
 
 ## Results
 
@@ -17,10 +16,9 @@ One run was evaluated on each of the 19 maps listed below. Success means complet
 
 | Planning mode | Lap completion | Collisions | Maps |
 |---|---:|---:|---:|
-| Direct (prior mean) | **17/19 (89.5%)** | **2/19 (10.5%)** | 19 |
 | CEM (MPC) | 11/19 (57.9%) | 8/19 (42.1%) | 19 |
 
-The direct-mode failures were on Montreal and Shanghai. CEM-mode failures were on Budapest, Montreal, Monza, SaoPaulo, Shanghai, Silverstone, Spa, and YasMarina. Evaluation maps: BrandsHatch, Budapest, Catalunya, Hockenheim, IMS, Melbourne, Montreal, Monza, Nuerburgring, Oschersleben, Sakhir, SaoPaulo, Sepang, Shanghai, Silverstone, Sochi, Spa, YasMarina, and Zandvoort.
+The CEM-mode failures were on Budapest, Montreal, Monza, SaoPaulo, Shanghai, Silverstone, Spa, and YasMarina. Evaluation maps: BrandsHatch, Budapest, Catalunya, Hockenheim, IMS, Melbourne, Montreal, Monza, Nuerburgring, Oschersleben, Sakhir, SaoPaulo, Sepang, Shanghai, Silverstone, Sochi, Spa, YasMarina, and Zandvoort.
 
 ## Reproduction
 
@@ -36,7 +34,9 @@ python scripts/evaluate.py --config configs/default.yaml \
   --eval_maps BrandsHatch Budapest Catalunya Hockenheim IMS Melbourne Montreal Monza Nuerburgring Oschersleben Sakhir SaoPaulo Sepang Shanghai Silverstone Sochi Spa YasMarina Zandvoort
 ```
 
-To plan on one map, run `scripts/plan_lap.py` with a trained checkpoint. Set `planning.mode` to `cem` or `direct` in the config.
+To plan on one map, run `scripts/plan_lap.py` with a trained checkpoint. Planning uses CEM-MPC as configured in `configs/default.yaml`.
+
+To inspect the learned latent skills, run `scripts/visualize_latent_skills.py --checkpoint checkpoints/oposm_final.pt --normalizer_dir checkpoints`. It writes a PCA scatter plot, observed trajectory examples representing populated PCA regions, and a CSV containing each window's latent vector and metadata. Use `--max_windows 0` to encode the full offline dataset.
 
 ## PPO comparison baseline
 
@@ -50,16 +50,12 @@ python scripts/train_rl.py --config configs/default.yaml --timesteps 2000000 --s
 python scripts/train_rl.py --config configs/default.yaml --timesteps 2000000 --seed 2
 ```
 
-Each run writes a checkpoint and adjacent JSON metadata under `checkpoints/rl/`. Evaluate the independent seeds on the same held-out maps and episode seeds, optionally alongside previously saved planner evaluations:
+Each run writes a checkpoint and adjacent JSON metadata under `checkpoints/rl/`. Evaluate existing checkpoints on the same held-out maps and episode seeds:
 
 ```bash
 python scripts/evaluate_rl.py --config configs/default.yaml \
-  --ppo_models checkpoints/rl/ppo_f1tenth_seed0.zip \
-               checkpoints/rl/ppo_f1tenth_seed1.zip \
-               checkpoints/rl/ppo_f1tenth_seed2.zip \
-  --episodes_per_map 5 --seed 10000 \
-  --direct_results results/planner_reference.json \
-  --cem_results results/planner_reference.json
+  --ppo_models checkpoints/rl/ppo_seed_0.zip checkpoints/rl/ppo_seed_1.zip \
+  --episodes_per_map 3 --seed 10000
 ```
 
 

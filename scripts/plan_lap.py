@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from models.skill_model import OPOSMSkillModel
-from planning.cem_planner import CEMPlanner, CEMPlannerConfig, direct_skill_race, mpc_race
+from planning.cem_planner import CEMPlanner, CEMPlannerConfig, mpc_race
 from planning.reward import LidarStructuralReward
 from utils.normalization import Normalizer
 from utils.track import Centerline, discover_map 
@@ -31,8 +31,6 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    if cfg.planning.mode not in {"cem", "direct"}:
-        raise ValueError("planning.mode must be 'cem' or 'direct'")
     device = resolve_device(cfg.planning.device)
     os.makedirs(args.out, exist_ok=True)
 
@@ -101,14 +99,10 @@ def main():
 
     print(f"[plan] map={args.map} num_waypoints={waypoints_raw.shape[0]} env={args.env}")
     try:
-        race_fn = direct_skill_race if cfg.planning.mode == "direct" else mpc_race
-        race_kwargs = {} if cfg.planning.mode == "direct" else {
-            "replan_every_skills": cfg.planning.replan_every_skills,
-        }
-        result = race_fn(
+        result = mpc_race(
             planner, env, waypoints_raw, skill_horizon=skill_horizon,
             max_skills=cfg.planning.max_skills_per_episode, max_laps=cfg.planning.max_laps,
-            **race_kwargs,
+            replan_every_skills=cfg.planning.replan_every_skills,
         )
     finally:
         if hasattr(env, "close"):
