@@ -1,7 +1,10 @@
 
 env/
 checkpoints/
-
+checkpoints_rl/
+notebook/
+figs/
+results/
 __pycache__/
 
 .vscode/

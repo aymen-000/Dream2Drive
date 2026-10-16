@@ -61,6 +61,12 @@ def _summarize_runs(results_for_all_runs):
     return track_coverage, lapc_completer, collision_rate
 
 
+def _average_lap_time(results_for_all_runs):
+    times = [float(t) for run in results_for_all_runs
+             for t in run.get("lap_times_sec", [])]
+    return float(np.mean(times)) if times else None
+
+
 # --------------------------------------------------------------------------
 # Map discovery: evaluate on maps under cfg.data.maps_root that were NOT
 # used for training (cfg.collection.map_names), so the planning results
@@ -271,6 +277,7 @@ def main():
                 "track_coverage": float(track_coverage),
                 "laps_completed": float(lapc_completer),
                 "collision_rate": float(collision_rate),
+                "avg_lap_time_sec": _average_lap_time(results_for_all_runs),
                 "num_runs": len(results_for_all_runs),
 
                 "runs": [
@@ -280,6 +287,7 @@ def main():
                         "final_progress_s": float(run["final_progress_s"]),
                         "total_track_s": float(run["total_track_s"]),
                         "collision": bool(run.get("collision", False)),
+                        "lap_times_sec": [float(t) for t in run.get("lap_times_sec", [])],
                     }
                     for run in results_for_all_runs
                 ],
@@ -310,6 +318,7 @@ def main():
                 "track_coverage": float(track_coverage),
                 "laps_completed": float(lapc_completer),
                 "collision_rate": float(collision_rate),
+                "avg_lap_time_sec": _average_lap_time(results_for_all_runs),
                 "num_runs": len(results_for_all_runs),
 
                 "runs": [
@@ -319,6 +328,7 @@ def main():
                         "final_progress_s": float(run["final_progress_s"]),
                         "total_track_s": float(run["total_track_s"]),
                         "collision": bool(run.get("collision", False)),
+                        "lap_times_sec": [float(t) for t in run.get("lap_times_sec", [])],
                     }
                     for run in results_for_all_runs
                 ],

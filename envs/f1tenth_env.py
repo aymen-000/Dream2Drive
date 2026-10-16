@@ -5,10 +5,6 @@ from typing import Optional
 import numpy as np
 import torch
 
-import gym
-
-
-
 from models.skill_model import OPOSMSkillModel
 from utils.normalization import Normalizer
 from f110_gym.envs.f110_env import F110Env
@@ -68,6 +64,10 @@ class F1TenthEnvironment:
     def get_state(self) -> np.ndarray:
         return np.asarray(self.env.sim.agents[0].state, dtype=np.float32).copy()
 
+    def get_elapsed_time(self) -> float:
+        """Simulator time in seconds since the most recent reset."""
+        return float(getattr(self.env, "current_time", 0.0))
+
     def get_lidar(self) -> np.ndarray:
         return self._policy_scan().copy()
 
@@ -122,4 +122,4 @@ class F1TenthEnvironment:
         return self.get_state()
 
     def close(self):
-        pass
+        self.env.close_rendering()

@@ -210,9 +210,11 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
         np.savez_compressed(os.path.join(save_dir, "track.npz"), waypoints=waypoints_raw)
 
     laps_completed = 0
+    lap_times_sec: List[float] = []
     stopped_for_predicted_collision = False
     collision_occurred = False  
     plan_call_idx = 0  
+    start_elapsed = env.get_elapsed_time() if hasattr(env, "get_elapsed_time") else 0.0
 
     prev_s, prev_i = calculate_progress_local(
         env.get_state()[[cfg.x_idx, cfg.y_idx]], wpts_list, cum_dist, prev_i=None
@@ -253,6 +255,8 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
             )
             if s < prev_s - total_s * 0.5:  # wrapped past s=0 -> lap completed
                 laps_completed += 1
+                if hasattr(env, "get_elapsed_time"):
+                    lap_times_sec.append(env.get_elapsed_time() - start_elapsed)
             prev_s = s
             prev_i = cur_i  # carry the index forward for the next step's window search
             print(f"[mpc_race] progress s={s:.3f}/{total_s:.3f}, laps={laps_completed}")
@@ -264,6 +268,7 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
         "trajectory_raw": np.stack(trajectory, axis=0),
         "executed_zs": np.stack(executed_zs, axis=0) if executed_zs else np.zeros((0, planner.model.z_dim)),
         "laps_completed": laps_completed,
+        "lap_times_sec": lap_times_sec,
         "final_progress_s": prev_s,
         "total_track_s": total_s,
         "stopped_for_predicted_collision": stopped_for_predicted_collision,
@@ -289,7 +294,9 @@ def direct_skill_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.n
     prev_s, prev_i = calculate_progress_local(
         env.get_state()[[cfg.x_idx, cfg.y_idx]], wpts_list, cum_dist)
     laps_completed = 0
+    lap_times_sec: List[float] = []
     collision_occurred = False
+    start_elapsed = env.get_elapsed_time() if hasattr(env, "get_elapsed_time") else 0.0
 
     zero_epsilon = np.zeros(planner.model.z_dim, dtype=np.float32)
     for _ in range(max_skills):
@@ -306,12 +313,15 @@ def direct_skill_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.n
             next_state[[cfg.x_idx, cfg.y_idx]], wpts_list, cum_dist, prev_i=prev_i)
         if s < prev_s - total_s * 0.5:
             laps_completed += 1
+            if hasattr(env, "get_elapsed_time"):
+                lap_times_sec.append(env.get_elapsed_time() - start_elapsed)
         prev_s, prev_i = s, cur_i
 
     return {
         "trajectory_raw": np.stack(trajectory, axis=0),
         "executed_zs": np.stack(executed_zs, axis=0) if executed_zs else np.zeros((0, planner.model.z_dim)),
         "laps_completed": laps_completed,
+        "lap_times_sec": lap_times_sec,
         "final_progress_s": prev_s,
         "total_track_s": total_s,
         "stopped_for_predicted_collision": False,

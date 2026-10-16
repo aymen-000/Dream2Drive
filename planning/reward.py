@@ -1,6 +1,3 @@
-""" 
-From https://github.com/BDEvan5/TrajectoryAidedLearning/blob/master/TrajectoryAidedLearning/Utils/RewardSignals.py wtih some modifications 
-"""
 from __future__ import annotations
 
 from typing import Tuple, Optional
@@ -107,13 +104,6 @@ def calculate_progress(point, wpts, cum_dist):
 
 
 class LidarStructuralReward:
-    """Reward predicted scans for usable forward clearance and forward safety.
-
-    Side beams are deliberately excluded from the collision test: a nearby
-    wall beside the car is normal on a narrow track and is not a frontal
-    collision. A lower forward-sector quantile makes the score less sensitive
-    to a single overly optimistic beam than using the mean clearance.
-    """
 
     def __init__(self, lidar_dim: int, forward_weight: float = 1.0,
                  symmetry_weight: float = 0.2, collision_penalty: float = 100.0,
