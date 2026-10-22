@@ -144,7 +144,9 @@ def classical_mpc_race(controller: KinematicMPCController, env, waypoints_raw: n
 
     max_ticks = int(max_seconds * control_hz)
     laps_completed = 0
+    lap_times_sec = []
     collision_occurred = False  
+    start_elapsed = env.get_elapsed_time() if hasattr(env, "get_elapsed_time") else 0.0
     prev_s = calculate_progress(env.get_state()[0:2], wpts_list, cum_dist)
 
     for _ in range(max_ticks):
@@ -162,6 +164,8 @@ def classical_mpc_race(controller: KinematicMPCController, env, waypoints_raw: n
         s = calculate_progress(next_state[0:2], wpts_list, cum_dist)
         if s < prev_s - total_s * 0.5: 
             laps_completed += 1
+            if hasattr(env, "get_elapsed_time"):
+                lap_times_sec.append(env.get_elapsed_time() - start_elapsed)
         prev_s = s
 
         if laps_completed >= max_laps:
@@ -170,6 +174,7 @@ def classical_mpc_race(controller: KinematicMPCController, env, waypoints_raw: n
     return {
         "trajectory_raw": np.stack(trajectory, axis=0),
         "laps_completed": laps_completed,
+        "lap_times_sec": lap_times_sec,
         "final_progress_s": prev_s,
         "total_track_s": total_s,
         "collision": collision_occurred, 

@@ -127,6 +127,15 @@ def collect_one_run(env, centerline: Centerline, target_speed: float, cfg, rng,
             if done:
                 break
 
+        try:
+            next_state = np.asarray(env.sim.agents[0].state, dtype=np.float32)
+        except AttributeError:
+            next_state = np.array([
+                obs["poses_x"][0], obs["poses_y"][0], 0.0,
+                obs["linear_vels_x"][0], obs["poses_theta"][0],
+                obs["ang_vels_z"][0], 0.0,
+            ], dtype=np.float32)
+
         collided = bool(done and obs["collisions"][0])
         is_last_tick = step == (num_ticks - 1)
         step_done = bool(done or is_last_tick)
@@ -135,6 +144,8 @@ def collect_one_run(env, centerline: Centerline, target_speed: float, cfg, rng,
             "map_name": map_name, "episode_id": episode_id, "step": step,
             "x": x, "y": y, "steer_angle": steer_angle, "vel": vel,
             "yaw_angle": yaw_angle, "yaw_rate": yaw_rate, "slip_angle": slip_angle,
+            "next_x": float(next_state[0]), "next_y": float(next_state[1]),
+            "next_vel": float(next_state[3]),
             "steer_cmd": action[0], "speed_cmd": action[1],
             "done": step_done, "collision": collided,
         }

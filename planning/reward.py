@@ -1,6 +1,3 @@
-""" 
-From https://github.com/BDEvan5/TrajectoryAidedLearning/blob/master/TrajectoryAidedLearning/Utils/RewardSignals.py wtih some modifications 
-"""
 from __future__ import annotations
 
 from typing import Tuple, Optional
@@ -104,6 +101,49 @@ def calculate_progress(point, wpts, cum_dist):
     seg_len = np.linalg.norm(seg_vec) + 1e-8
     t = np.clip(np.dot(np.array(point) - np.array(p_i), seg_vec) / (seg_len ** 2), 0.0, 1.0)
     return cum_dist[min_i] + t * seg_len
+
+
+class LidarStructuralReward:
+
+    def __init__(self, lidar_dim: int, forward_weight: float = 1.0,
+                 symmetry_weight: float = 0.2, collision_penalty: float = 100.0,
+                 safe_distance: float = 0.35, forward_fraction: float = 0.30):
+        if lidar_dim < 4:
+            raise ValueError("LidarStructuralReward requires at least four beams")
+        if not 0.0 < forward_fraction < 1.0:
+            raise ValueError("forward_fraction must be between 0 and 1")
+        self.lidar_dim = int(lidar_dim)
+        self.forward_weight = float(forward_weight)
+        # Kept for compatibility with existing configs; scan symmetry is not
+        # a useful driving objective and is no longer included in the score.
+        self.symmetry_weight = float(symmetry_weight)
+        self.collision_penalty = float(collision_penalty)
+        self.safe_distance = float(safe_distance)
+        self.reward_mode = "lidar_structural"
+
+        forward_count = max(1, int(round(lidar_dim * forward_fraction)))
+        start = (lidar_dim - forward_count) // 2
+        self.forward_slice = slice(start, start + forward_count)
+        if start == 0 or start + forward_count == lidar_dim:
+            raise ValueError("LiDAR scan must leave beams on both sides of the forward sector")
+
+    def __call__(self, lidar_rollouts: np.ndarray) -> np.ndarray:
+        scans = np.asarray(lidar_rollouts, dtype=np.float32)
+        if scans.ndim != 3 or scans.shape[-1] != self.lidar_dim:
+            raise ValueError(f"expected scans shaped (K, L, {self.lidar_dim}), got {scans.shape}")
+        scans = np.nan_to_num(scans, nan=0.0, posinf=0.0, neginf=0.0)
+        forward = scans[..., self.forward_slice]
+        # A conservative signal: reward clearance available across most of
+        # the forward corridor rather than an average that can hide one side
+        # being blocked.
+        clearance = np.quantile(forward, 0.25, axis=-1)
+        collision = np.min(forward, axis=-1) < self.safe_distance
+
+        per_skill = self.forward_weight * clearance
+        active = np.cumsum(collision, axis=1) == 0
+        rewards = (per_skill * active).sum(axis=1)
+        rewards -= self.collision_penalty * collision.any(axis=1)
+        return rewards.astype(np.float32)
 
 
 class CenterlineProgressReward:

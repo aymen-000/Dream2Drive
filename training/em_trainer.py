@@ -56,6 +56,8 @@ class EMTrainer:
         # --- metrics history, for later plotting ---
         self.metrics_path = cfg.metrics_path or os.path.join(cfg.checkpoint_dir, "metrics.json")
         self.metrics_history: list[dict] = []
+        self.validation_metrics_path = os.path.join(cfg.checkpoint_dir, "validation_metrics.json")
+        self.validation_history: list[dict] = []
 
     def _to_device(self, batch):
         return {k: v.to(self.device) for k, v in batch.items()}
@@ -111,7 +113,41 @@ class EMTrainer:
 
         return metrics
 
-    def fit(self, dataloader: DataLoader, num_epochs: int, steps_per_epoch: Optional[int] = None):
+    @torch.no_grad()
+    def evaluate(self, dataloader: DataLoader) -> dict[str, float]:
+        """Aggregate held-out ELBO terms and terminal-scan reconstruction MSE."""
+        was_training = self.model.training
+        self.model.eval()
+        totals = {key: 0.0 for key in ("loss", "elbo", "log_pi", "log_psi", "kl", "lidar_mse")}
+        count = 0
+        for batch in dataloader:
+            batch = self._to_device(batch)
+            terms = self.model.elbo_terms(batch)
+            target = torch.clamp(
+                batch["lidar_T"], min=0.0, max=self.model.lidar_max_range
+            ) / self.model.lidar_max_range
+            o0_embed = self.model.lidar_encoder(batch["lidar_seq"][:, 0])
+            pred, _ = self.model.tawm(o0_embed, terms["z"])
+            batch_size = batch["lidar_T"].shape[0]
+            values = {
+                "loss": -terms["elbo"].mean(),
+                "elbo": terms["elbo"].mean(),
+                "log_pi": terms["log_pi"].mean(),
+                "log_psi": terms["log_psi"].mean(),
+                "kl": terms["kl"].mean(),
+                "lidar_mse": (pred - target).square().mean(),
+            }
+            for key, value in values.items():
+                totals[key] += float(value) * batch_size
+            count += batch_size
+        if was_training:
+            self.model.train()
+        if count == 0:
+            raise ValueError("Validation dataloader is empty")
+        return {key: value / count for key, value in totals.items()}
+
+    def fit(self, dataloader: DataLoader, num_epochs: int, steps_per_epoch: Optional[int] = None,
+            val_dataloader: Optional[DataLoader] = None):
         data_iter = iter(dataloader)
         for epoch in range(1, num_epochs + 1):
             steps = steps_per_epoch or len(dataloader)
@@ -122,6 +158,20 @@ class EMTrainer:
                     data_iter = iter(dataloader)
                     batch = next(data_iter)
                 self.train_step(batch, epoch=epoch)
+
+            if val_dataloader is not None:
+                val_metrics = self.evaluate(val_dataloader)
+                val_record = {
+                    "step": self.global_step,
+                    "epoch": epoch,
+                    **{f"val_{key}": value for key, value in val_metrics.items()},
+                }
+                self.validation_history.append(val_record)
+                print(
+                    f"[validation epoch {epoch:>4d}] "
+                    + "  ".join(f"{key}={value:.4f}" for key, value in val_metrics.items())
+                )
+                self._save_validation_metrics()
 
             if epoch % self.cfg.save_every_epochs == 0 or epoch == num_epochs:
                 self.save_checkpoint(os.path.join(self.cfg.checkpoint_dir, f"oposm_epoch{epoch}.pt"))
@@ -138,6 +188,7 @@ class EMTrainer:
             "action_dim": self.model.action_dim,
             "z_dim": self.model.z_dim,
             "lidar_dim": self.model.lidar_dim,
+            "world_model_target": "terminal_lidar",
             "obs_embed_dim": self.model.obs_embed_dim,
             "tawm_predict_delta": self.model.tawm_predict_delta,
         }, path)
@@ -148,6 +199,10 @@ class EMTrainer:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w") as f:
             json.dump(self.metrics_history, f, indent=2)
+
+    def _save_validation_metrics(self):
+        with open(self.validation_metrics_path, "w") as f:
+            json.dump(self.validation_history, f, indent=2)
 
     @staticmethod
     def load_model(model: OPOSMSkillModel, path: str, device: str = "cpu") -> OPOSMSkillModel:

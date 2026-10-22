@@ -3,11 +3,11 @@ data:
   maps_root: "maps"
   runs: null
   train_run_frac: 0.95
-  subtraj_len: 20
-  subsample_stride: 4
+  subtraj_len: 10
+  subsample_stride: 1
   dropna: true
   lidar_dim: 128
-  lidar_max_range: 30.0
+  lidar_max_range: 10.0
 
   state_features:
     - x
@@ -24,10 +24,10 @@ data:
 
 collection:
   map_names: ["Spielberg" , "Austin" , "MoscowRaceway"]
-  laps_per_map: 600
-  episodes_per_map: 600
+  laps_per_map: 1000
+  episodes_per_map: 1000
   run_seconds: 30
-  max_speed_choices: [3.0, 4.0, 5.0, 6.0]
+  max_speed_choices: [ 4.0, 5.0, 6.0]
   action_noise: true
   steer_noise_std: 0.06
   speed_noise_std: 0.5
@@ -47,7 +47,8 @@ model:
   gru_bidirectional: true
   min_std: 1.0e-3
   obs_embed_dim: 128
-  tawm_predict_delta: true
+  # Predict absolute terminal state from the initial LiDAR embedding and z.
+  tawm_predict_delta: false
 
 
 train:
@@ -66,14 +67,15 @@ train:
   mode: "causal_em"
 
 planning:
+  mode: "cem"
   plan_length: 2
 
-  population_size: 512
+  population_size: 256
   elite_frac: 0.10
   cem_iters: 5
   init_std: 1.0
 
-  replan_every_skills: 2
+  replan_every_skills: 1
   max_skills_per_episode: 300
   max_laps: 1
   waypoint_spacing_m: 3.0
@@ -87,8 +89,13 @@ planning:
   max_progress_per_skill_m: 12.0
 
   collision_penalty: 1000.0
+  forward_reward_weight: 1.0
+  symmetry_penalty_weight: 0.2
+  lidar_collision_penalty: 100.0
+  safe_distance_m: 0.35
+  forward_beam_fraction: 0.30
   device: "cuda"
-  reward : "progress" #TAL NOT IMPLEMENTED , cth
+  reward: "lidar_structural"
 
 mpc:
   horizon: 4

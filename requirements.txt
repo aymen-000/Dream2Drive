@@ -5,6 +5,9 @@ PyYAML>=6.0
 matplotlib>=3.6
 tqdm>=4.65
 gym
+gymnasium>=0.29
+stable-baselines3>=2.3
+sb3-contrib>=2.3
 
 # f1tenth_gym is not on PyPI -- install separately:
 #   git clone https://github.com/f1tenth/f1tenth_gym.git

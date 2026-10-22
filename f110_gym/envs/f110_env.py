@@ -10,11 +10,26 @@ from f110_gym.envs.base_classes import Simulator
 # others
 import numpy as np
 import os
+import socket
 import csv
 import time
 
 # gl
 import pyglet
+display = os.environ.get("DISPLAY", "")
+headless = not display
+if display.startswith(":"):
+    socket_path = f"/tmp/.X11-unix/X{display[1:].split('.', 1)[0]}"
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.connect(socket_path)
+    except OSError:
+        headless = True
+    finally:
+        probe.close()
+if headless:
+    # Training and evaluation run without rendering on headless Kaggle/CI workers.
+    pyglet.options["headless"] = True
 
 from f110_gym.envs.rendering import EnvRenderer
 pyglet.options['debug_gl'] = False

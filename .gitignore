@@ -1,16 +1,24 @@
 
 env/
 checkpoints/
-
+checkpoints_rl/
+notebook/
+!notebook/
+notebook/*
+!notebook/rl_baselines.ipynb
+figs/
+results/
 __pycache__/
 
 .vscode/
 
 outputs/
 track.npz/
-
-
+baseline_checkpoints/
+baseline/
 f1tenth_racetracks/
 maps/
+baseline_checkpoints/
+
 
 
