@@ -1,21 +1,3 @@
-"""
-Draw the imagined CEM rollouts saved by CEMPlanner (cfg.save_dir) / mpc_race
-(save_dir=...) as publication-style PNGs.
-
-Expects, in save_dir:
-    track.npz            -- {"waypoints": (N, 2)}          [written once by mpc_race]
-    plan_step_00000.npz  -- one file per planning call, containing:
-        init_position               (2,)
-        best_predicted_positions    (L, 2)
-        best_reward                 scalar
-        elite_idx                   (num_elite,)
-        population_positions        (K, L, 2)   [only if cfg.save_population]
-        population_rewards          (K,)        [only if cfg.save_population]
-
-Usage:
-    python viz_scripts/plot_imagined_rollout.py --save_dir runs/race1/imagined --step 0
-    python viz_scripts/plot_imagined_rollout.py --save_dir runs/race1/imagined --step all --out_dir figs
-"""
 from __future__ import annotations
 
 import argparse
@@ -25,7 +7,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---- paper-style rcParams -------------------------------------------------
 plt.rcParams.update({
     "figure.dpi": 150,
     "savefig.dpi": 300,

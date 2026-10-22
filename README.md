@@ -1,9 +1,5 @@
 # Offline Abstract World Model for Autonomous Racing from LiDAR
 
-**Aimen Boukhari**  
-École Nationale Supérieure d’Informatique (ESI), Algiers, Algeria  
-mn.boukhar@esi.dz
-
 [Paper (coming soon)](#)
 
 This repository adapts Online Planning with Offline Skill Models (OPOSM) to F1TENTH racing. The method learns from offline driving data and plans over latent driving skills using LiDAR observations, without explicit state estimates or further online training.
