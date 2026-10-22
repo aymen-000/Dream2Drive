@@ -1,30 +1,3 @@
-"""
-scripts/make_gifs.py
-
-Render an animated GIF of the CEM-planner / TAWM closed-loop rollout on one
-or more tracks, using the exact same planning + execution path as
-`scripts/plan_lap.py`. Each frame shows the centerline, the target
-waypoints, the trajectory driven so far, and the car (drawn as an oriented
-triangle) at its current pose.
-
-Usage
------
-    python scripts/make_gifs.py --config configs/default.yaml \
-        --checkpoint checkpoints/oposm_final.pt \
-        --maps Spielberg Austin Nuerburgring Catalunya \
-        --out figures --fps 20
-
-Notes
------
-- This reuses `F1TenthEnvironment` for closed-loop execution (real LiDAR
-  scans from `f1tenth_gym`), exactly like `plan_lap.py`. Set `--render`
-  only if you also want to pop up the live pyglet window while frames are
-  being recorded; it is not required and will slow things down.
-- Frames are subsampled with `--frame-stride` (recorded at `control_hz`
-  ticks; a stride of 2 at control_hz=20 gives ~10 rendered frames/sec of
-  sim time) and hard-capped with `--max-frames` so GIFs stay a reasonable
-  size.
-"""
 from __future__ import annotations
 
 import argparse

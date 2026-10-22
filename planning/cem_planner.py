@@ -196,6 +196,12 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
              replan_every_skills: int = 1, save_dir: Optional[str] = None) -> dict:
     trajectory = [env.get_state().copy()]
     executed_zs: List[np.ndarray] = []
+    initial_lidar = env.get_lidar().copy()
+    real_lidar_trajectory = [initial_lidar]
+    imagined_lidar_trajectory = [initial_lidar.copy()]
+    yaw_idx = planner.cfg.yaw_idx if planner.cfg.yaw_idx is not None else 4
+    lidar_poses = [env.get_state()[[planner.cfg.x_idx, planner.cfg.y_idx,
+                                    yaw_idx]].copy()]
 
     cfg = planner.cfg
     wpts_list = waypoints_raw.tolist()
@@ -244,6 +250,9 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
             next_state = env.execute_skill(z_k, skill_horizon)
             trajectory.append(next_state.copy())
             executed_zs.append(z_k)
+            imagined_lidar_trajectory.append(plan["predicted_lidar"][k].copy())
+            real_lidar_trajectory.append(env.get_lidar().copy())
+            lidar_poses.append(next_state[[cfg.x_idx, cfg.y_idx, yaw_idx]].copy())
             if getattr(env, "crashed", False):
                 collision_occurred = True
                 print(f"[mpc_race] stopping: collision detected "
@@ -273,4 +282,7 @@ def mpc_race(planner: CEMPlanner, env: Environment, waypoints_raw: np.ndarray,
         "total_track_s": total_s,
         "stopped_for_predicted_collision": stopped_for_predicted_collision,
         "collision": collision_occurred,   
+        "real_lidar_trajectory": np.stack(real_lidar_trajectory, axis=0),
+        "imagined_lidar_trajectory": np.stack(imagined_lidar_trajectory, axis=0),
+        "lidar_poses": np.stack(lidar_poses, axis=0),
     }

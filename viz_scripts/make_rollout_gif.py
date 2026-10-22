@@ -1,25 +1,3 @@
-"""
-Animate the car's movement with its imagined points, straight from the saved .npz files.
-
-Each frame t shows:
-    - track waypoints/centerline (dashed gray)
-    - race line: the path the car has actually driven up to step t (solid blue)
-    - the car: its current position at step t (black square)
-    - imagined points: the best plan's predicted terminal states from step t (red dots,
-      growing in size with step order). Optionally the whole CEM population (faint dots).
-
-Reads from save_dir (written by mpc_race(save_dir=...)):
-    track.npz, plan_step_XXXXX.npz
-
-Optional --traj: the *_plan.npz written by run_plan.py (key "trajectory"). If given,
-the race line uses that denser executed trajectory; otherwise it is built from the
-car positions at each planning step.
-
-Usage:
-    python make_rollout_gif.py --save_dir runs/race1/imagined --out rollouts.gif
-    python make_rollout_gif.py --save_dir runs/race1/imagined --traj outputs/plan_lap/Spielberg_plan.npz \
-        --fps 6 --show_population
-"""
 from __future__ import annotations
 
 import argparse

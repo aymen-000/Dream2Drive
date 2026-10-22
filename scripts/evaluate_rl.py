@@ -1,239 +1,223 @@
+"""Matched evaluation for saved PPO, PPO-LSTM, SAC, and IQL checkpoints."""
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
 
-import numpy as np
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from stable_baselines3 import PPO
+import numpy as np
+import torch
 
 from scripts.config_utils import load_config
-from utils.track import discover_map, progress_fraction
-
-
-def summarize_runs(runs: list[dict]) -> dict:
-    successes = [run for run in runs if run["laps_completed"] > 0]
-    lap_times = [time for run in runs for time in run["lap_times_sec"]]
-    return {
-        "num_episodes": len(runs),
-        "successes": len(successes),
-        "success_rate": len(successes) / len(runs) if runs else 0.0,
-        "collision_count": sum(bool(run["collision"]) for run in runs),
-        "collision_rate": float(np.mean([run["collision"] for run in runs])) if runs else 0.0,
-        "avg_successful_lap_time_sec": float(np.mean(lap_times)) if lap_times else None,
-        "avg_speed_mps": float(np.mean([run["avg_speed_mps"] for run in runs])) if runs else None,
-        "avg_target_speed_mps": float(np.mean([run["avg_target_speed_mps"] for run in runs])) if runs else None,
-        "max_progress_fraction_mean": float(np.mean([run["max_progress_fraction"] for run in runs])) if runs else None,
-        "max_progress_fraction_std": float(np.std([run["max_progress_fraction"] for run in runs], ddof=1))
-        if len(runs) > 1 else (0.0 if runs else None),
-    }
-
-
-def evaluate_model(model: PPO, checkpoint: str, config_path: str,
-                   eval_maps: list[str], episodes_per_map: int,
-                   max_episode_seconds: float, base_seed: int,
-                   training_maps: list[str], training_seed):
-    # Import the simulator only after PPO.load(): importing F110Env initializes
-    # pyglet/OpenGL, which can conflict with PyTorch checkpoint loading.
-    from rl_baselines.ppo_env import F1TenthPPOEnv
-
-    runs = []
-    for map_idx, map_name in enumerate(eval_maps):
-        for episode in range(episodes_per_map):
-            eval_seed = base_seed + map_idx * episodes_per_map + episode
-            env = F1TenthPPOEnv(
-                map_name, randomize_start=True,
-                max_episode_seconds=max_episode_seconds,
-                config_path=config_path)
-            try:
-                start_index = int(np.random.default_rng(eval_seed).integers(len(env.points)))
-                obs, _ = env.reset(seed=eval_seed, options={"start_index": start_index})
-                terminated = truncated = False
-                total_reward = speed_sum = target_speed_sum = 0.0
-                steps = 0
-                max_progress_m = 0.0
-                info = {}
-                while not (terminated or truncated):
-                    action, _ = model.predict(obs, deterministic=True)
-                    obs, reward, terminated, truncated, info = env.step(action)
-                    max_progress_m = max(max_progress_m, float(info["progress_m"]))
-                    total_reward += float(reward)
-                    speed_sum += float(info["speed_mps"])
-                    target_speed_sum += float(info["target_speed_mps"])
-                    steps += 1
-                runs.append({
-                    "map_name": map_name,
-                    "episode": episode,
-                    "seed": eval_seed,
-                    "start_index": start_index,
-                    "laps_completed": int(info["laps_completed"]),
-                    "collision": bool(info["collision"]),
-                    "elapsed_time_sec": float(info["elapsed_time_sec"]),
-                    "lap_times_sec": list(info["lap_times_sec"]),
-                    "episode_return": total_reward,
-                    "progress_m": float(info["progress_m"]),
-                    "total_track_m": float(info["total_track_m"]),
-                    "max_progress_m": max_progress_m,
-                    "max_progress_fraction": progress_fraction(
-                        max_progress_m, float(info["total_track_m"])),
-                    "avg_speed_mps": speed_sum / max(steps, 1),
-                    "avg_target_speed_mps": target_speed_sum / max(steps, 1),
-                })
-                row = runs[-1]
-                print(f"[evaluate_rl] PPO {map_name} episode={episode} "
-                      f"laps={row['laps_completed']} collision={row['collision']}")
-            finally:
-                env.close()
-
-    per_map = {name: summarize_runs([run for run in runs if run["map_name"] == name])
-               for name in eval_maps}
-    return {
-        "algorithm": "PPO",
-        "training_seed": training_seed,
-        "checkpoint": os.path.abspath(checkpoint),
-        "training_maps": training_maps,
-        "eval_maps": eval_maps,
-        "episodes_per_map": episodes_per_map,
-        "runs": runs,
-        "per_map": per_map,
-        "summary": summarize_runs(runs),
-    }
-
-
-def summarize_checkpoints(results: dict[str, dict]) -> dict:
-    metrics = ("success_rate", "collision_rate", "avg_successful_lap_time_sec",
-               "avg_speed_mps", "avg_target_speed_mps", "max_progress_fraction_mean")
-    aggregate = {}
-    for metric in metrics:
-        values = [result["summary"][metric] for result in results.values()
-                  if result["summary"][metric] is not None]
-        aggregate[metric] = {
-            "mean": float(np.mean(values)) if values else None,
-            "std": float(np.std(values, ddof=1)) if len(values) > 1 else None,
-            "per_seed": values,
-        }
-    return aggregate
-
-
-def discover_available_maps(maps_root: str) -> list[str]:
-    """Find map folders with the expected YAML/image/centerline files."""
-    if not os.path.isdir(maps_root):
-        raise FileNotFoundError(f"maps_root '{maps_root}' does not exist.")
-    names = []
-    for name in sorted(os.listdir(maps_root)):
-        folder = os.path.join(maps_root, name)
-        if not os.path.isdir(folder):
-            continue
-        try:
-            discover_map(maps_root, name)
-            names.append(name)
-        except FileNotFoundError as exc:
-            print(f"[evaluate] skipping '{name}' under '{maps_root}' "
-                  f"(not a usable map: {exc})")
-    return names
+from scripts.evaluate_all import (
+    discover_available_maps,
+    discover_baseline_checkpoints,
+    evaluate_iql_episode,
+    evaluate_ppo_episode,
+    load_baseline,
+    summarize,
+)
+from utils.track import discover_map
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate existing PPO checkpoints on held-out F1TENTH maps.")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--ppo_models", nargs="+", required=True,
-                        help="Existing Stable-Baselines3 PPO .zip checkpoints to evaluate.")
-    parser.add_argument("--eval_maps", nargs="+", default=None,
-                        help="Optional explicit maps; defaults to available held-out maps.")
+    parser.add_argument(
+        "--checkpoints", "--ppo_models", dest="checkpoints", nargs="+", default=None,
+        help="Saved PPO/PPO-LSTM/SAC .zip and IQL .pt checkpoints; type is detected per file.",
+    )
+    parser.add_argument("--checkpoint_dirs", nargs="+", default=None,
+                        help="Discover saved PPO/PPO-LSTM/SAC/IQL checkpoints in these folders.")
+    parser.add_argument("--algorithm", choices=("auto", "ppo", "ppo_lstm", "sac", "iql"),
+                        default="auto", help="Use auto for mixed checkpoint types.")
+    parser.add_argument("--eval_maps", nargs="+", default=None)
     parser.add_argument("--include_train_maps", action="store_true")
     parser.add_argument("--episodes_per_map", type=int, default=5)
     parser.add_argument("--max_episode_seconds", type=float, default=120.0)
-    parser.add_argument("--seed", type=int, default=10000,
-                        help="Base evaluation seed; each map/episode gets a distinct seed.")
-    parser.add_argument("--output", default="outputs/rl_comparison/evaluation_results.json")
+    parser.add_argument("--seed", type=int, default=10000)
+    parser.add_argument("--output_dir", default="outputs/rl_comparison")
     args = parser.parse_args()
     if args.episodes_per_map <= 0:
         parser.error("episodes_per_map must be positive")
+    args.checkpoints = list(args.checkpoints or [])
+    if args.checkpoint_dirs:
+        try:
+            args.checkpoints.extend(discover_baseline_checkpoints(args.checkpoint_dirs))
+        except FileNotFoundError as exc:
+            parser.error(str(exc))
+    args.checkpoints = sorted(set(args.checkpoints))
+    if not args.checkpoints:
+        parser.error("Provide --checkpoints or --checkpoint_dirs")
 
-    project_cfg = load_config(args.config)
-    checkpoint_metadata = {}
-    for path in args.ppo_models:
+    cfg = load_config(args.config)
+    training_maps = set(cfg.collection.map_names)
+    checkpoint_info = []
+    for path in args.checkpoints:
         if not os.path.isfile(path):
             parser.error(f"Checkpoint does not exist: {path}")
-        metadata_path = os.path.splitext(path)[0] + ".json"
-        if os.path.isfile(metadata_path):
-            with open(metadata_path) as metadata_file:
-                checkpoint_metadata[path] = json.load(metadata_file)
-
-    training_maps = set(project_cfg.collection.map_names)
-    if checkpoint_metadata:
-        training_maps = set().union(*(
-            set(metadata.get("training_maps", []))
-            for metadata in checkpoint_metadata.values())) or training_maps
+        sidecar_path = os.path.splitext(path)[0] + ".json"
+        metadata = {}
+        if os.path.isfile(sidecar_path):
+            with open(sidecar_path) as sidecar_file:
+                metadata = json.load(sidecar_file)
+        elif path.lower().endswith(".pt"):
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+        training_maps.update(metadata.get("training_maps", []))
+        training_maps.update(metadata.get("dataset_maps", []))
+        checkpoint_info.append((path, metadata))
 
     if args.eval_maps:
-        eval_maps = list(args.eval_maps)
-        for map_name in eval_maps:
-            try:
-                discover_map(project_cfg.data.maps_root, map_name)
-            except Exception as exc:
-                parser.error(f"Invalid evaluation map '{map_name}': {exc}")
+        maps = list(args.eval_maps)
     else:
-        available = discover_available_maps(project_cfg.data.maps_root)
-        eval_maps = (available if args.include_train_maps else
-                     [name for name in available if name not in training_maps])
-    if not eval_maps:
-        raise RuntimeError("No held-out maps found. Check maps/ and training maps.")
-    overlap = sorted(training_maps.intersection(eval_maps))
+        available = discover_available_maps(cfg.data.maps_root)
+        maps = available if args.include_train_maps else [
+            name for name in available if name not in training_maps
+        ]
+    if not maps:
+        parser.error("No evaluation maps found; pass --eval_maps or check training maps.")
+    for name in maps:
+        try:
+            discover_map(cfg.data.maps_root, name)
+        except Exception as exc:
+            parser.error(f"Invalid evaluation map {name!r}: {exc}")
+    overlap = sorted(set(maps) & training_maps)
     if overlap and not args.include_train_maps:
         parser.error(f"Evaluation maps overlap with checkpoint training maps: {overlap}")
-    map_description = "maps" if args.include_train_maps else "held-out maps"
-    print(f"Evaluating {len(eval_maps)} {map_description}: {eval_maps}")
 
-    results = {}
-    for index, path in enumerate(args.ppo_models):
-        print(f"[evaluate_rl] loading PPO checkpoint with Stable-Baselines3: {path}",
-              flush=True)
+    loaded = []
+    expected_obs_dim = int(cfg.data.lidar_dim) + 2
+    for path, sidecar in checkpoint_info:
         try:
-            policy = PPO.load(path, device="cpu")
+            algorithm, model = load_baseline(path, args.algorithm)
         except Exception as exc:
-            parser.error(f"Could not load PPO checkpoint '{path}' with Stable-Baselines3: {exc}")
-        expected_dim = int(project_cfg.data.lidar_dim) + 2
-        obs_shape = getattr(policy.observation_space, "shape", None)
-        obs_dim = int(np.prod(obs_shape)) if obs_shape else None
-        if obs_dim != expected_dim:
-            parser.error(f"{path}: checkpoint expects observation shape {obs_shape}, but this "
-                         f"environment provides {expected_dim} (LiDAR + speed + steering)")
-        metadata = checkpoint_metadata.get(path, {})
-        training_seed = metadata.get("seed")
-        label = f"PPO seed {training_seed}" if training_seed is not None else f"PPO model {index + 1}"
-        print(f"[evaluate_rl] loading existing PPO checkpoint {path} with Stable-Baselines3 "
-              f"(obs_shape={obs_shape}, device={policy.device})", flush=True)
-        results[label] = evaluate_model(
-            policy, path, args.config, eval_maps, args.episodes_per_map,
-            args.max_episode_seconds, args.seed,
-            metadata.get("training_maps", sorted(training_maps)), training_seed)
+            parser.error(f"Could not load checkpoint {path}: {exc}")
+        if algorithm == "iql":
+            obs_dim = int(model.config.obs_dim)
+            action_shape = (int(model.config.action_dim),)
+        else:
+            obs_shape = getattr(model.observation_space, "shape", None)
+            obs_dim = int(np.prod(obs_shape)) if obs_shape else None
+            action_shape = getattr(model.action_space, "shape", None)
+        if obs_dim != expected_obs_dim:
+            parser.error(
+                f"{path} expects {obs_dim} observation values; the evaluation "
+                f"environment provides {expected_obs_dim}."
+            )
+        if action_shape != (2,):
+            parser.error(f"{path} has action shape {action_shape}; expected (2,).")
+        metadata = getattr(model, "baseline_metadata", sidecar)
+        seed = metadata.get("seed")
+        display_algorithm = "PPO-LSTM" if algorithm == "ppo_lstm" else algorithm.upper()
+        label = (f"{display_algorithm} seed {seed} ({os.path.basename(path)})"
+                 if seed is not None else os.path.basename(path))
+        loaded.append((label, algorithm, model, path, metadata))
 
+    results_by_checkpoint = {}
+    rows = []
+    for label, algorithm, model, path, metadata in loaded:
+        checkpoint_runs = []
+        for map_idx, map_name in enumerate(maps):
+            for episode in range(args.episodes_per_map):
+                eval_seed = args.seed + map_idx * args.episodes_per_map + episode
+                if algorithm == "iql":
+                    row = evaluate_iql_episode(
+                        model, args.config, map_name, eval_seed, args.max_episode_seconds
+                    )
+                else:
+                    row = evaluate_ppo_episode(
+                        model, args.config, map_name, eval_seed,
+                        args.max_episode_seconds, algorithm,
+                    )
+                row.update({
+                    "algorithm": "PPO-LSTM" if algorithm == "ppo_lstm" else algorithm.upper(),
+                    "checkpoint": os.path.abspath(path),
+                    "training_seed": metadata.get("seed"),
+                    "episode": episode,
+                })
+                checkpoint_runs.append(row)
+                rows.append(row)
+                print(
+                    f"[evaluate_rl] {label} map={map_name} seed={eval_seed} "
+                    f"laps={row['laps_completed']} collision={row['collision']}"
+                )
+        results_by_checkpoint[label] = {
+            "algorithm": "PPO-LSTM" if algorithm == "ppo_lstm" else algorithm.upper(),
+            "checkpoint": os.path.abspath(path),
+            "training_seed": metadata.get("seed"),
+            "runs": checkpoint_runs,
+            "per_map": {
+                name: summarize([run for run in checkpoint_runs if run["map_name"] == name])
+                for name in maps
+            },
+            "summary": summarize(checkpoint_runs),
+        }
+
+    algorithm_groups = {}
+    for result in results_by_checkpoint.values():
+        algorithm_groups.setdefault(result["algorithm"], []).extend(result["runs"])
     report = {
         "metadata": {
+            "config": os.path.abspath(args.config),
             "training_maps": sorted(training_maps),
-            "evaluation_maps": eval_maps,
+            "evaluation_maps": maps,
             "episodes_per_map": args.episodes_per_map,
             "evaluation_base_seed": args.seed,
+            "max_episode_seconds": args.max_episode_seconds,
+            "matched_evaluation": (
+                "Every checkpoint receives the same map, derived evaluation seed, "
+                "centerline start, and episode time limit."
+            ),
+            "observation": (
+                "Full normalized LiDAR followed by normalized speed and steering; "
+                "IQL receives the same observation layout used during training."
+            ),
             "success_definition": "at least one complete lap in an episode",
-            "start_policy": "index from NumPy default_rng(seed), then centerline tangent",
-            "progress_definition": "maximum segment-projected distance from seeded start, modulo track length, divided by track length and capped at one lap",
-            "observation": "normalized LiDAR, speed/max_speed in [0, 1], steering/max_steer in [-1, 1]",
         },
-        "results": results,
-        "aggregate_across_checkpoints": summarize_checkpoints(results),
+        "summary_by_algorithm": {
+            name: summarize(group) for name, group in algorithm_groups.items()
+        },
+        "results_by_checkpoint": results_by_checkpoint,
+        "runs": rows,
     }
-    output_dir = os.path.dirname(args.output)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    with open(args.output, "w") as output_file:
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(os.path.join(args.output_dir, "evaluation_results.json"), "w") as output_file:
         json.dump(report, output_file, indent=2, allow_nan=False)
-    print(f"Saved evaluation report: {args.output}")
+
+    fields = sorted({key for row in rows for key in row})
+    with open(os.path.join(args.output_dir, "evaluation_runs.csv"), "w", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: json.dumps(value) if isinstance(value, (list, dict)) else value
+                             for key, value in row.items()})
+
+    summary_fields = ["algorithm", "checkpoint", "training_seed", "episodes", "successes",
+                      "success_rate", "collision_rate", "max_progress_fraction_mean",
+                      "successful_lap_time_mean_sec", "successful_lap_time_std_sec"]
+    with open(os.path.join(args.output_dir, "evaluation_summary.csv"), "w", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=summary_fields, extrasaction="ignore")
+        writer.writeheader()
+        for result in results_by_checkpoint.values():
+            writer.writerow({key: result.get(key) for key in summary_fields} | result["summary"])
+
+    algorithm_fields = ["algorithm", "episodes", "successes", "success_rate",
+                        "collision_rate", "max_progress_fraction_mean",
+                        "successful_lap_time_mean_sec", "successful_lap_time_std_sec"]
+    with open(os.path.join(args.output_dir, "evaluation_algorithm_summary.csv"),
+              "w", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=algorithm_fields, extrasaction="ignore")
+        writer.writeheader()
+        for algorithm, summary in report["summary_by_algorithm"].items():
+            writer.writerow({"algorithm": algorithm, **summary})
+
+    print(f"Saved JSON, run-level CSV, and checkpoint summary CSV under {args.output_dir}")
 
 
 if __name__ == "__main__":

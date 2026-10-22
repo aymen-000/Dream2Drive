@@ -27,7 +27,7 @@ collection:
   laps_per_map: 1000
   episodes_per_map: 1000
   run_seconds: 30
-  max_speed_choices: [3.0, 4.0, 5.0, 6.0]
+  max_speed_choices: [ 4.0, 5.0, 6.0]
   action_noise: true
   steer_noise_std: 0.06
   speed_noise_std: 0.5
@@ -70,7 +70,7 @@ planning:
   mode: "cem"
   plan_length: 2
 
-  population_size: 512
+  population_size: 256
   elite_frac: 0.10
   cem_iters: 5
   init_std: 1.0

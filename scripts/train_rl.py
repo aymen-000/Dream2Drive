@@ -13,7 +13,6 @@ sys.path.insert(0, ROOT)
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from rl_baselines.ppo_env import F1TenthPPOEnv
 from scripts.config_utils import load_config
 
 
@@ -25,17 +24,19 @@ def main():
     parser.add_argument("--timesteps", type=int, default=2_000_000,
                         help="Total transitions across all vector environments.")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--algorithm", choices=("ppo", "ppo_lstm"), default="ppo",
+                        help="PPO feed-forward or SB3-Contrib recurrent PPO (LSTM).")
     parser.add_argument("--max_episode_seconds", type=float, default=120.0)
     parser.add_argument("--output_dir", default="checkpoints/rl")
     parser.add_argument("--n_envs", type=int, default=3,
                         help="Number of environments, distributed over training maps.")
-    parser.add_argument("--n_steps", type=int, default=2048)
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--n_steps", type=int, default=4096)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--learning_rate", type=float, default=2.5e-4)
+    parser.add_argument("--gamma", type=float, default=0.995)
     parser.add_argument("--gae_lambda", type=float, default=0.95)
     parser.add_argument("--clip_range", type=float, default=0.2)
-    parser.add_argument("--ent_coef", type=float, default=0.0)
+    parser.add_argument("--ent_coef", type=float, default=0.01)
     parser.add_argument("--time_penalty_per_sec", type=float, default=0.2,
                         help="Reward cost per simulated second to discourage stopping.")
     parser.add_argument("--device", default="auto")
@@ -44,6 +45,18 @@ def main():
         parser.error("timesteps, n_envs, and n_steps must be positive")
     if args.batch_size <= 0 or args.batch_size > args.n_steps * args.n_envs:
         parser.error("batch_size must be in [1, n_steps * n_envs]")
+    if args.algorithm == "ppo_lstm":
+        try:
+            from sb3_contrib import RecurrentPPO
+        except ImportError:
+            parser.error("PPO-LSTM needs sb3-contrib; install it with `pip install sb3-contrib`")
+        algorithm_class, policy_name = RecurrentPPO, "MlpLstmPolicy"
+        policy_kwargs = {"lstm_hidden_size": 128, "n_lstm_layers": 1,
+                         "shared_lstm": False, "enable_critic_lstm": True,
+                         "net_arch": {"pi": [128], "vf": [128]}}
+    else:
+        algorithm_class, policy_name = PPO, "MlpPolicy"
+        policy_kwargs = {"net_arch": [256, 256, 128]}
 
     cfg = load_config(args.config)
     maps = list(args.train_maps or cfg.collection.map_names)
@@ -62,6 +75,8 @@ def main():
 
     def make_env(map_name):
         def _init():
+            from rl_baselines.ppo_env import F1TenthPPOEnv
+
             return F1TenthPPOEnv(
                 map_name, randomize_start=True,
                 max_episode_seconds=args.max_episode_seconds,
@@ -72,21 +87,23 @@ def main():
 
     vec_env = DummyVecEnv([make_env(name) for name in selected_maps])
     vec_env.seed(args.seed)
-    model = PPO(
-        "MlpPolicy", vec_env, verbose=1, seed=args.seed, device=args.device,
+    common_kwargs = dict(
+        verbose=1, seed=args.seed, device=args.device,
         n_steps=args.n_steps, batch_size=args.batch_size,
         learning_rate=args.learning_rate, gamma=args.gamma,
         gae_lambda=args.gae_lambda, clip_range=args.clip_range,
-        ent_coef=args.ent_coef, policy_kwargs={"net_arch": [256, 256]},
+        ent_coef=args.ent_coef, target_kl=0.03,
         tensorboard_log=os.path.join(args.output_dir, "tensorboard"),
     )
-    print(f"[train_rl] PPO maps={selected_maps} envs={n_envs} "
+    model = algorithm_class(policy_name, vec_env, policy_kwargs=policy_kwargs,
+                            **common_kwargs)
+    print(f"[train_rl] {args.algorithm.upper()} maps={selected_maps} envs={n_envs} "
           f"total_timesteps={args.timesteps} seed={args.seed}")
     model.learn(total_timesteps=args.timesteps, progress_bar=True)
-    stem = f"ppo_f1tenth_seed{args.seed}"
+    stem = f"{args.algorithm}_f1tenth_seed{args.seed}"
     model.save(os.path.join(args.output_dir, stem))
     metadata = {
-        "algorithm": "PPO", "seed": args.seed, "total_timesteps": args.timesteps,
+        "algorithm": args.algorithm.upper(), "seed": args.seed, "total_timesteps": args.timesteps,
         "training_maps": maps, "environment_maps": selected_maps,
         "randomized_start": True, "max_episode_seconds": args.max_episode_seconds,
         "observation": (f"{cfg.data.lidar_dim} LiDAR ranges scaled to [0, 1], "
@@ -96,7 +113,8 @@ def main():
             "n_envs": n_envs, "n_steps": args.n_steps, "batch_size": args.batch_size,
             "learning_rate": args.learning_rate, "gamma": args.gamma,
             "gae_lambda": args.gae_lambda, "clip_range": args.clip_range,
-            "ent_coef": args.ent_coef, "policy_architecture": [256, 256],
+            "ent_coef": args.ent_coef, "target_kl": 0.03,
+            "policy_architecture": policy_kwargs,
         },
         "environment": {
             "lidar_dim": cfg.data.lidar_dim,
@@ -109,7 +127,7 @@ def main():
             "speed_weight": 0.02,
             "time_penalty_per_sec": args.time_penalty_per_sec,
             "lap_bonus": 50.0,
-            "collision_penalty": 50.0,
+            "collision_penalty": 80.0,
         },
         "config": os.path.abspath(args.config),
     }

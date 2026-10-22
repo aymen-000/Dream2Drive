@@ -1,64 +1,89 @@
-# Dream2Drive
+# Offline Abstract World Model for Autonomous Racing from LiDAR
 
-**Learning Temporally Abstract World Models for Zero-Shot F1TENTH Racing**
+**Aimen Boukhari**  
+École Nationale Supérieure d’Informatique (ESI), Algiers, Algeria  
+mn.boukhar@esi.dz
 
-Dream2Drive adapts OPOSM to F1TENTH autonomous racing. It learns latent driving skills, a low-level policy, and a skill-conditioned temporally abstract world model from offline driving logs. At evaluation, a planner uses imagined LiDAR rollouts to choose skills without online training.
+[Paper (coming soon)](#)
+
+This repository adapts Online Planning with Offline Skill Models (OPOSM) to F1TENTH racing. The method learns from offline driving data and plans over latent driving skills using LiDAR observations, without explicit state estimates or further online training.
+
+On unseen tracks, the approach achieved an **82% lap-completion rate**, compared with 67% for offline IQL and 42% for PPO-LSTM.
 
 ## Method
 
-An encoder maps each offline trajectory segment to a latent skill. The skill-conditioned policy decodes that skill into low-level steering and speed commands, while the world model predicts the terminal LiDAR scan after executing it. The model is trained offline with a causal EM objective. At run time, CEM searches over sequences of latent skills using imagined LiDAR rollouts and a structural reward:
+The world model predicts future LiDAR observations for candidate skill sequences. At inference, the Cross-Entropy Method (CEM) searches those sequences to maximize predicted driving reward.
 
-- `cem`: Cross-Entropy Method search over sequences of latent skills.
+![Training architecture](figures/train_arch.jpg)
 
-## Results
+## Installation
 
-One run was evaluated on each of the 19 maps listed below. Success means completing one lap; collision rate is the fraction of runs with a collision.
-
-| Planning mode | Lap completion | Collisions | Maps |
-|---|---:|---:|---:|
-| CEM (MPC) | 11/19 (57.9%) | 8/19 (42.1%) | 19 |
-
-The CEM-mode failures were on Budapest, Montreal, Monza, SaoPaulo, Shanghai, Silverstone, Spa, and YasMarina. Evaluation maps: BrandsHatch, Budapest, Catalunya, Hockenheim, IMS, Melbourne, Montreal, Monza, Nuerburgring, Oschersleben, Sakhir, SaoPaulo, Sepang, Shanghai, Silverstone, Sochi, Spa, YasMarina, and Zandvoort.
-
-## Reproduction
-
-Install dependencies and obtain the F1TENTH simulator and track maps, then configure paths and hyperparameters in [`configs/default.yaml`](configs/default.yaml).
+Run these commands from the project root. Install the F1TENTH Gym simulator, this project's Python dependencies, and the maps configured for data collection:
 
 ```bash
+git clone https://github.com/f1tenth/f1tenth_gym.git
+cd f1tenth_gym && pip install -e . && cd ..
 pip install -r requirements.txt
+
+git clone https://github.com/f1tenth/f1tenth_racetracks.git
+mkdir -p maps
+cp -r f1tenth_racetracks/Spielberg maps/Spielberg
+cp -r f1tenth_racetracks/Austin maps/Austin
+cp -r f1tenth_racetracks/MoscowRaceway maps/MoscowRaceway
+```
+
+The default collection maps are Spielberg, Austin, and MoscowRaceway. Copy any additional maps you plan to collect data from or evaluate into `maps/` in the same way. The `maps_root` and `collection.map_names` settings are in [`configs/default.yaml`](configs/default.yaml).
+
+## Training
+
+Generate offline driving data, then train the skill model and world model:
+
+```bash
 python scripts/generate_offline_data.py --config configs/default.yaml
 python scripts/train.py --config configs/default.yaml
+```
+
+Data is written under `data/offline/`; checkpoints and normalizers are saved under `checkpoints/`. Adjust collection and training settings in `configs/default.yaml` before running.
+
+## Evaluation
+
+Evaluate a trained model on selected tracks:
+
+```bash
 python scripts/evaluate.py --config configs/default.yaml \
   --em_checkpoint checkpoints/oposm_final.pt \
   --normalizer_dir checkpoints \
-  --eval_maps BrandsHatch Budapest Catalunya Hockenheim IMS Melbourne Montreal Monza Nuerburgring Oschersleben Sakhir SaoPaulo Sepang Shanghai Silverstone Sochi Spa YasMarina Zandvoort
+  --eval_maps BrandsHatch Budapest Catalunya Hockenheim IMS Melbourne Montreal Monza
 ```
 
-To plan on one map, run `scripts/plan_lap.py` with a trained checkpoint. Planning uses CEM-MPC as configured in `configs/default.yaml`.
+The evaluation script writes results under `outputs/`. Use `python scripts/evaluate.py --help` to see all options.
 
-To inspect the learned latent skills, run `scripts/visualize_latent_skills.py --checkpoint checkpoints/oposm_final.pt --normalizer_dir checkpoints`. It writes a PCA scatter plot, observed trajectory examples representing populated PCA regions, and a CSV containing each window's latent vector and metadata. Use `--max_windows 0` to encode the full offline dataset.
+## Plan a lap
 
-## PPO comparison baseline
-
-PPO is the project's only online reinforcement-learning baseline. It receives normalized LiDAR ranges and outputs steering and target speed. Its dense reward combines forward centerline progress, cross-track error, a small positive speed term, a per-second time cost, a lap-completion bonus, and a collision penalty. The time cost discourages the policy from standing still. Training uses multiple configured collection maps and randomized centerline start positions. Evaluation uses seeded randomized start positions by default, so repeated episodes cover different parts of each map and all checkpoints see the same evaluation states. Use `--fixed_start` for a fixed start pose. The map lists, environment settings, and PPO hyperparameters should be reported with any results.
-
-Install the dependencies, then train one model per seed. `--timesteps` is the total number of transitions across vector environments.
+After training, run the CEM planner on a map. The map must be present under `maps/`, and the checkpoint and normalizers must be in `checkpoints/`:
 
 ```bash
-python scripts/train_rl.py --config configs/default.yaml --timesteps 2000000 --seed 0
-python scripts/train_rl.py --config configs/default.yaml --timesteps 2000000 --seed 1
-python scripts/train_rl.py --config configs/default.yaml --timesteps 2000000 --seed 2
+python scripts/plan_lap.py --config configs/default.yaml \
+  --checkpoint checkpoints/oposm_final.pt \
+  --map Spielberg --render
 ```
 
-Each run writes a checkpoint and adjacent JSON metadata under `checkpoints/rl/`. Evaluate existing checkpoints on the same held-out maps and episode seeds:
+`--render` opens the simulator window; omit it for headless planning. The trajectory and plot are saved under `outputs/plan_lap/` by default. Set `--out` to change the output directory.
 
-```bash
-python scripts/evaluate_rl.py --config configs/default.yaml \
-  --ppo_models checkpoints/rl/ppo_seed_0.zip checkpoints/rl/ppo_seed_1.zip \
-  --episodes_per_map 3 --seed 10000
+## Self-contained notebooks
+
+Run the method without cloning or using this repository's scripts with the [OPOSM method notebook](notebook/notebook.ipynb). For comparison baselines, see the [PPO, PPO-LSTM, and IQL notebook](notebook/rl_baselines.ipynb). Both notebooks include the code and setup needed for their respective workflows.
+
+## Citation
+
+```text
+Paper coming soon.
 ```
 
+## Acknowledgements
 
-## Acknowledgements and license
+Built on [F1TENTH Gym](https://github.com/f1tenth/f1tenth_gym) and [F1TENTH racetracks](https://github.com/f1tenth/f1tenth_racetracks).
 
-Built on [F1TENTH Gym](https://github.com/f1tenth/f1tenth_gym) and [F1TENTH racetracks](https://github.com/f1tenth/f1tenth_racetracks). Licensed under MIT.
+## License
+
+This project is licensed under the MIT License.

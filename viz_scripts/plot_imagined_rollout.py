@@ -13,8 +13,8 @@ Expects, in save_dir:
         population_rewards          (K,)        [only if cfg.save_population]
 
 Usage:
-    python plot_imagined_rollouts.py --save_dir runs/race1/imagined --step 0
-    python plot_imagined_rollouts.py --save_dir runs/race1/imagined --step all --out_dir figs
+    python viz_scripts/plot_imagined_rollout.py --save_dir runs/race1/imagined --step 0
+    python viz_scripts/plot_imagined_rollout.py --save_dir runs/race1/imagined --step all --out_dir figs
 """
 from __future__ import annotations
 
